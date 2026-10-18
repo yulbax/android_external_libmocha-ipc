@@ -193,6 +193,12 @@ void ipc_network_radio_info(void* data)
 	ss.GW_SignalStrength.signalStrength = asu;
 	ss.GW_SignalStrength.bitErrorRate = 99;
 
+	ril_data.state.signal_strength = ss;
+	ril_data.state.have_signal_strength = 1;
+
+	if (ril_data.state.screen_off)
+		return;
+
 	ril_request_unsolicited(RIL_UNSOL_SIGNAL_STRENGTH, &ss, sizeof(ss));
 }
 
