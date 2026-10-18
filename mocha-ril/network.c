@@ -199,7 +199,14 @@ void ipc_network_radio_info(void* data)
 void ipc_network_select(void* data)
 {	
 	tapiNetworkInfo* netInfo = (tapiNetworkInfo*)(data);
-	
+	int old_reg_state = ril_data.state.reg_state;
+	int old_act = ril_data.state.act;
+	char old_spn[NET_MAX_SPN_LEN];
+	char old_name[NET_MAX_NAME_LEN];
+
+	memcpy(old_spn, ril_data.state.SPN, sizeof(old_spn));
+	memcpy(old_name, ril_data.state.name, sizeof(old_name));
+
 	ALOGD("%s: serviceLevel=%d, serviceType=%d, psServiceType=%d, systemId.systemType=%d, sysIdFormat = %d, networkMode = 0x%X, systemId =%d, bForbidden = %d, bHome = %d, bEquivalent=%d, bRoaming=%d, name=%s, spn=%s, registrationFail.state=%d, registrationFail.cause=%d, bDisplayPplmn=%d, bDisplaySpn=%d", __func__, netInfo->serviceLevel, netInfo->serviceType, netInfo->psServiceType, netInfo->systemType, netInfo->sysIdFormat, netInfo->networkMode, netInfo->systemId, netInfo->bForbidden, netInfo->bHome, netInfo->bEquivalent, netInfo->bRoaming, netInfo->name, netInfo->spn, netInfo->registrationFail.state, netInfo->registrationFail.cause, netInfo->bDisplayPplmn, netInfo->bDisplaySpn);
 
 	/* Converts IPC network registration status to Android RIL format */
@@ -240,7 +247,7 @@ void ipc_network_select(void* data)
 			ril_data.state.act = RADIO_TECH_HSDPA;
 			break;
 		default:
-			ril_data.state.reg_state = RADIO_TECH_UNKNOWN;
+			ril_data.state.act = RADIO_TECH_UNKNOWN;
 			break;
 	}
 
@@ -259,7 +266,11 @@ void ipc_network_select(void* data)
 		ril_data.tokens.network_selection = 0;
 	}
 
-	ril_request_unsolicited(RIL_UNSOL_RESPONSE_VOICE_NETWORK_STATE_CHANGED, NULL, 0);
+	if (ril_data.state.reg_state != old_reg_state ||
+		ril_data.state.act != old_act ||
+		strcmp(ril_data.state.SPN, old_spn) != 0 ||
+		strcmp(ril_data.state.name, old_name) != 0)
+		ril_request_unsolicited(RIL_UNSOL_RESPONSE_VOICE_NETWORK_STATE_CHANGED, NULL, 0);
 }
 
 void ipc_cell_info(void* data)
