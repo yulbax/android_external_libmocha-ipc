@@ -298,7 +298,10 @@ void ipc_cell_info(void* data)
 		}
 		sprintf(ril_data.state.proper_plmn, "%d", plmn_dec);
 	}
-	ril_request_unsolicited(RIL_UNSOL_RESPONSE_VOICE_NETWORK_STATE_CHANGED, NULL, 0);
+
+	if (cellInfo->bCellChanged || cellInfo->bRACChanged ||
+		cellInfo->bLACChanged || cellInfo->bPLMNChanged)
+		ril_request_unsolicited(RIL_UNSOL_RESPONSE_VOICE_NETWORK_STATE_CHANGED, NULL, 0);
 }
 
 
