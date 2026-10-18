@@ -18,7 +18,10 @@
  *
  */
 
+#include <errno.h>
 #include <fcntl.h>
+#include <unistd.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -396,13 +399,21 @@ static int srs_server_open(void)
 	return -1;
 }
 
+static void srs_client_read_loop_wake(struct srs_client_data *client_data)
+{
+	char c = 0;
+
+	if (write(client_data->wake_fd[1], &c, sizeof(c)) < 0 && errno != EAGAIN)
+		ALOGE("Unable to wake up SRS client read loop: %s", strerror(errno));
+}
+
 void *srs_client_read_loop(void *data)
 {
 	struct srs_client_info *client;
 	struct srs_client_data *client_data;
 	struct srs_message message;
-	struct timeval timeout;
 	fd_set fds;
+	char buf[16];
 	int fd_max;
 	int fd;
 	int rc;
@@ -419,15 +430,18 @@ void *srs_client_read_loop(void *data)
 		fd_max = srs_client_info_fill_fd_set(client_data, &fds);
 		SRS_CLIENT_UNLOCK();
 
-		if (fd_max < 0) {
-			usleep(3000);
+		FD_SET(client_data->wake_fd[0], &fds);
+		if (client_data->wake_fd[0] > fd_max)
+			fd_max = client_data->wake_fd[0];
+
+		rc = select(fd_max + 1, &fds, NULL, NULL, NULL);
+		if (rc < 0)
+			continue;
+
+		if (FD_ISSET(client_data->wake_fd[0], &fds)) {
+			while (read(client_data->wake_fd[0], buf, sizeof(buf)) > 0);
 			continue;
 		}
-
-		timeout.tv_sec = 0;
-		timeout.tv_usec = 3000;
-
-		select(fd_max + 1, &fds, NULL, NULL, &timeout);
 
 		SRS_CLIENT_LOCK();
 		while ((fd = srs_client_info_get_fd_set(client_data, &fds)) >= 0) {
@@ -512,11 +526,14 @@ int srs_read_loop(struct ril_client *client)
 			ALOGE("Unable to register SRS client");
 			break;
 		}
+
+		srs_client_read_loop_wake(client_data);
 	}
 
 	ALOGE("SRS server failure");
 
 	client_data->running = 0;
+	srs_client_read_loop_wake(client_data);
 
 	// Wait for the thread to finish
 	pthread_join(client_data->thread, NULL);
@@ -541,9 +558,18 @@ int srs_create(struct ril_client *client)
 		return -1;
 	}
 
+	if (pipe(client_data->wake_fd) < 0) {
+		ALOGE("SRS wake pipe creation failed");
+		goto fail;
+	}
+	fcntl(client_data->wake_fd[0], F_SETFL, fcntl(client_data->wake_fd[0], F_GETFL) | O_NONBLOCK);
+	fcntl(client_data->wake_fd[1], F_SETFL, fcntl(client_data->wake_fd[1], F_GETFL) | O_NONBLOCK);
+
 	client_data->server_fd = srs_server_open();
 	if (client_data->server_fd < 0) {
 		ALOGE("SRS server creation failed");
+		close(client_data->wake_fd[0]);
+		close(client_data->wake_fd[1]);
 		goto fail;
 	}
 
@@ -583,6 +609,9 @@ int srs_destroy(struct ril_client *client)
 
 	if (client_data->server_fd > 0)
 		close(client_data->server_fd);
+
+	close(client_data->wake_fd[0]);
+	close(client_data->wake_fd[1]);
 
 	memset(client_data, 0, sizeof(struct srs_client_data));
 	free(client_data);
