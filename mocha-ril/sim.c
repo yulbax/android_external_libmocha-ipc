@@ -51,7 +51,18 @@ void ipc_sim_open(void *data)
 	}
 	size_delta = 0x473 - simEvent->bufLen; /* 0x473 is event buffer length in "modern" packets. Packets on some SW versions are shorter. */
 	/* copying IMSI in BCD format from sim packet */
-	int imsi_len = buf[0xAE - size_delta];
+	int imsi_len = 0;
+	if (simEvent->eventStatus == SIM_OK && 0xAE - size_delta >= (int)sizeof(simEventPacketHeader))
+		imsi_len = buf[0xAE - size_delta];
+	if (imsi_len > (int)sizeof(ril_data.cached_bcd_imsi) ||
+			0xB2 - size_delta + imsi_len > (int)(sizeof(simEventPacketHeader) + simEvent->bufLen))
+		imsi_len = 0;
+	if (imsi_len < 2) {
+		ALOGE("%s: no IMSI in this SIM event (status %d)", __func__, simEvent->eventStatus);
+		ril_tokens_check();
+		ipc_boot8_mode(1);
+		return;
+	}
 	int i = 0;
 	for (i = 0; i < imsi_len; i++)
 		ril_data.cached_bcd_imsi[i] = buf[i+0xB2 - size_delta];
