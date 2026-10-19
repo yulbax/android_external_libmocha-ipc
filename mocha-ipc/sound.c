@@ -130,6 +130,17 @@ void sound_send_1mic_ns_ctrl(uint8_t enabled)
 	sound_send_packet((uint8_t *)&snd_packet, sizeof(soundPacket));
 }
 
+void sound_send_ns_ec_ctrl(uint8_t enabled)
+{
+	soundPacket snd_packet;
+	if(enabled)
+		snd_packet.buffer[0] = SOUND_PACKET_NS_EC_ON;
+	else
+		snd_packet.buffer[0] = SOUND_PACKET_NS_EC_OFF;
+
+	sound_send_packet((uint8_t *)&snd_packet, sizeof(soundPacket));
+}
+
 void sound_send_pcm_if_ctrl(uint8_t enabled)
 {
 	soundPacket snd_packet;
