@@ -187,6 +187,9 @@ struct ril_state {
 	char SPN[NET_MAX_SPN_LEN];
 	char name[NET_MAX_NAME_LEN];
 	unsigned char dtmf_tone;
+	int screen_off;
+	int have_signal_strength;
+	RIL_SignalStrength_v6 signal_strength;
 };
 
 typedef struct ril_config {
