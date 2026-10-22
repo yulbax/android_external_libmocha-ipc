@@ -28,6 +28,9 @@
 #include <linux/if.h>
 #include <linux/if_tun.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <string.h>
+#include <unistd.h>
 
 #define LOG_TAG "RIL-Mocha-GPRS"
 #include <utils/Log.h>
@@ -78,61 +81,75 @@ uint8_t data_call_type_to_proto_type(char* type)
 
 void *gprs_tunneling_thread(void *data)
 {
-	int n;
+	int n, fd_max;
 	uint8_t buf[1500]; //MTU is 1500
 	ril_gprs_connection *gprs_connection = (ril_gprs_connection *)data;
     fd_set fds;
-	struct timeval select_timeout;
 
 	ALOGD("%s: Thread initialized for connection cid %d, contextId %d on %s", __func__, 
 		gprs_connection->cid, gprs_connection->contextId, gprs_connection->ifname);
+
+	fd_max = gprs_connection->iface > gprs_connection->wake_fd[0] ?
+		gprs_connection->iface : gprs_connection->wake_fd[0];
 	while(1)
-	{		
-		pthread_mutex_lock(&gprs_connection->mutex);
+	{
 		FD_ZERO(&fds);
 		FD_SET(gprs_connection->iface, &fds);
-		select_timeout.tv_sec = 0;
-		select_timeout.tv_usec = 300000; //300ms select timeout
-		select(gprs_connection->iface+1, &fds, NULL, NULL, &select_timeout);
-		if(gprs_connection->thread_state == 2)
-		{			
-			pthread_mutex_unlock(&gprs_connection->mutex);
-			pthread_exit(NULL);
-			return NULL;
+		FD_SET(gprs_connection->wake_fd[0], &fds);
+		if(select(fd_max + 1, &fds, NULL, NULL, NULL) < 0)
+		{
+			if(errno == EINTR)
+				continue;
+			ALOGE("%s: select failed on %s: %s", __func__, gprs_connection->ifname, strerror(errno));
+			break;
 		}
+		if(FD_ISSET(gprs_connection->wake_fd[0], &fds))
+			break;
 		if(FD_ISSET(gprs_connection->iface, &fds)) {
 			n = read(gprs_connection->iface, buf, 1500);
-			RIL_LOCK();
+			if(n <= 0)
+				continue;
 			ALOGV("%s: Tunneling %d bytes of the net frame from %s to CP", __func__, n, gprs_connection->ifname);
 			proto_send_data(PROTO_OPMODE_PS, gprs_connection->type, gprs_connection->contextId, n, buf);
-			RIL_UNLOCK();
-		}		
-		pthread_mutex_unlock(&gprs_connection->mutex);
+		}
 	}
+	return NULL;
 }
 
 int gprs_start_tunneling_thread(struct ril_gprs_connection *gprs_connection)
 {
-	pthread_attr_t attr;
 	int rd;
 
-	pthread_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	rd = pthread_create(&gprs_connection->thread, &attr, gprs_tunneling_thread, (void *) gprs_connection);
+	if(pipe(gprs_connection->wake_fd) < 0)
+		return -1;
+	fcntl(gprs_connection->wake_fd[1], F_SETFL, fcntl(gprs_connection->wake_fd[1], F_GETFL) | O_NONBLOCK);
+
+	rd = pthread_create(&gprs_connection->thread, NULL, gprs_tunneling_thread, (void *) gprs_connection);
 	if(rd == 0)
 	{
 		gprs_connection->thread_state = 1;
+	}
+	else
+	{
+		close(gprs_connection->wake_fd[0]);
+		close(gprs_connection->wake_fd[1]);
 	}
 	return rd;
 }
 
 int gprs_stop_tunneling_thread(struct ril_gprs_connection *gprs_connection)
 {
+	char c = 0;
+
 	if(gprs_connection->thread_state == 1)
 	{
 		gprs_connection->thread_state = 2;
-		pthread_mutex_lock(&gprs_connection->mutex);
-		pthread_mutex_unlock(&gprs_connection->mutex);
+		if(write(gprs_connection->wake_fd[1], &c, sizeof(c)) < 0)
+			ALOGE("%s: Unable to wake up the tunneling thread: %s", __func__, strerror(errno));
+		pthread_join(gprs_connection->thread, NULL);
+		close(gprs_connection->wake_fd[0]);
+		close(gprs_connection->wake_fd[1]);
+		gprs_connection->thread_state = 0;
 		return 0;
 	}
 	return -1;
@@ -150,7 +167,6 @@ int ril_gprs_connection_register(int cid)
 
 	gprs_connection->cid = cid;
 	gprs_connection->iface = -1;
-	pthread_mutex_init(&gprs_connection->mutex, NULL);
 
 	list_end = ril_data.gprs_connections;
 	while (list_end != NULL && list_end->next != NULL)
@@ -172,7 +188,6 @@ void ril_gprs_connection_unregister(struct ril_gprs_connection *gprs_connection)
 		return;
 
 	gprs_stop_tunneling_thread(gprs_connection);
-	pthread_mutex_destroy(&gprs_connection->mutex);
 	memset(gprs_connection, 0, sizeof(struct ril_gprs_connection));
 	free(gprs_connection);
 	
@@ -282,9 +297,11 @@ list_continue:
 
 void ril_gprs_connection_stop(struct ril_gprs_connection *gprs_connection)
 {
-	ALOGD("Destroying GPRS connection with cid: %d", gprs_connection->cid);
 	if (gprs_connection == NULL)
 		return;
+	ALOGD("Destroying GPRS connection with cid: %d", gprs_connection->cid);
+
+	gprs_stop_tunneling_thread(gprs_connection);
 
 	if (gprs_connection->iface >= 0)
 		close(gprs_connection->iface);

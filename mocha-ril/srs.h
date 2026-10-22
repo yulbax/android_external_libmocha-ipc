@@ -52,6 +52,8 @@ struct srs_client_data {
 	pthread_t thread;
 	pthread_mutex_t mutex;
 	int running;
+
+	int wake_fd[2];
 };
 
 extern struct ril_client_funcs srs_client_funcs;

@@ -144,6 +144,36 @@ int32_t get_nvm_data(void *data, uint32_t size)
 	return 0;
 }
 
+#if defined(DEVICE_WAVE)
+#define NV_BACKUP_CHUNK		0x800
+#define NV_BACKUP_PAGE		0x1000
+
+static int32_t get_nv_backup(uint8_t *data, uint32_t size)
+{
+	uint32_t pages = (size + NV_BACKUP_CHUNK - 1) / NV_BACKUP_CHUNK;
+	uint8_t *raw;
+	uint32_t i, len;
+
+	raw = malloc(pages * NV_BACKUP_PAGE);
+	if (raw == NULL)
+		return -1;
+	if (get_nvm_data(raw, pages * NV_BACKUP_PAGE) < 0) {
+		free(raw);
+		return -1;
+	}
+	for (i = 0; i < pages; i++) {
+		len = size - i * NV_BACKUP_CHUNK;
+		if (len > NV_BACKUP_CHUNK)
+			len = NV_BACKUP_CHUNK;
+		memcpy(data + i * NV_BACKUP_CHUNK, raw + i * NV_BACKUP_PAGE, len);
+	}
+	free(raw);
+	return 0;
+}
+#else
+#define get_nv_backup(data, size) get_nvm_data(data, size)
+#endif
+
 void handleReadNvRequest(struct drvNvPacket* rxNvPacket)
 {
 	struct modem_io request;
@@ -152,7 +182,7 @@ void handleReadNvRequest(struct drvNvPacket* rxNvPacket)
 
 	request.data = malloc((rxNvPacket->size) + sizeof(struct drvPacketHeader));
 	request.data[0] = NV_BACKUP_DATA;	
-	get_nvm_data(request.data + sizeof(struct drvPacketHeader), rxNvPacket->size);
+	get_nv_backup(request.data + sizeof(struct drvPacketHeader), rxNvPacket->size);
 
 	request.magic = 0xCAFECAFE;
 	request.cmd = FIFO_PKT_DRV;

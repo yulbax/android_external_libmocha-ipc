@@ -69,5 +69,6 @@ void sound_send_set_path(uint16_t inDevice, uint16_t outDevice, uint8_t inDevice
 							uint8_t outDeviceMuted, uint16_t soundType, uint16_t oemVolume);
 void sound_send_1mic_ns_ctrl(uint8_t enabled);
 void sound_send_pcm_if_ctrl(uint8_t enabled);
+void sound_send_ns_ec_ctrl(uint8_t enabled);
 
 #endif

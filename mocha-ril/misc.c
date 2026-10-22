@@ -52,14 +52,27 @@ void ril_request_screen_state(RIL_Token t, void *data, size_t datalen)
 {
 	uint32_t status = 0;
 
+	if (data == NULL || datalen < sizeof(int)) {
+		ril_request_complete(t, RIL_E_GENERIC_FAILURE, NULL, 0);
+		return;
+	}
+
 	if (((int *)data)[0] == 0 )
+	{
+		ril_data.state.screen_off = 1;
 		ipc_power_mode(0);
+	}
 	else
 	{
+		ril_data.state.screen_off = 0;
 		drv_send_packet(BATT_GAUGE_STATUS_REQ, (uint8_t*)&status, 4);
 		ipc_power_mode(6);
 	}
 	ril_request_complete(t, RIL_E_SUCCESS, NULL, 0);
+
+	if (!ril_data.state.screen_off && ril_data.state.have_signal_strength)
+		ril_request_unsolicited(RIL_UNSOL_SIGNAL_STRENGTH,
+			&ril_data.state.signal_strength, sizeof(ril_data.state.signal_strength));
 }
 
 
