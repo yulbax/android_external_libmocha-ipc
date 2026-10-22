@@ -20,6 +20,7 @@
 
 #define LOG_TAG "RIL-Mocha-SND"
 #include <utils/Log.h>
+#include <cutils/properties.h>
 
 #include "mocha-ril.h"
 #include "util.h"
@@ -50,6 +51,15 @@ void srs_snd_set_audio_path(struct srs_message *message)
 	ril_data.outDevice = set_path->outDevice;
 	sound_send_set_path(set_path->inDevice, set_path->outDevice, 0, 0, set_path->soundType, 6 /* dummy volume */);
 	sound_send_set_mute(set_path->inDevice, set_path->outDevice, 0, 0, set_path->soundType);
+
+	if (set_path->soundType == SND_TYPE_VOICE) {
+		char value[PROPERTY_VALUE_MAX];
+		property_get("persist.ril.voice_ns_ec", value, "true");
+		int ns_ec = set_path->outDevice != SND_OUTPUT_BLUETOOTH &&
+				strcmp(value, "false") != 0 && strcmp(value, "0") != 0;
+		ALOGD("%s - noise suppression and echo cancellation %s\n", __func__, ns_ec ? "on" : "off");
+		sound_send_ns_ec_ctrl(ns_ec);
+	}
 }
 
 void srs_snd_1mic_ns_ctrl(struct srs_message *message)
