@@ -19,6 +19,9 @@
  *
  */
 
+#include <errno.h>
+#include <string.h>
+
 #define LOG_TAG "RIL-Mocha-IPC"
 #include <utils/Log.h>
 
@@ -81,11 +84,16 @@ int ipc_modem_io(void *data, uint32_t cmd)
 	return retval;
 }
 
+#define IPC_MAX_EAGAIN 16
+
 int ipc_read_loop(struct ril_client *client)
 {
     struct modem_io resp;
 	struct ipc_client *ipc_client;
 	int ipc_client_fd;
+	int recv_errno;
+	int eagain_count = 0;
+	int rc;
 	fd_set fds;
 
 	if(client == NULL) {
@@ -101,9 +109,6 @@ int ipc_read_loop(struct ril_client *client)
 	ipc_client = ((struct ipc_client_data *) client->data)->ipc_client;
 	ipc_client_fd = ((struct ipc_client_data *) client->data)->ipc_client_fd;
 
-	FD_ZERO(&fds);
-	FD_SET(ipc_client_fd, &fds);
-
 	ALOGI("Starting read loop, fd = %d", ipc_client_fd);
 
 	while(1) {
@@ -112,16 +117,32 @@ int ipc_read_loop(struct ril_client *client)
 			return -1;
 		}
 
-		select(FD_SETSIZE, &fds, NULL, NULL, NULL);
+		FD_ZERO(&fds);
+		FD_SET(ipc_client_fd, &fds);
+
+		rc = select(ipc_client_fd + 1, &fds, NULL, NULL, NULL);
+		if(rc < 0) {
+			if(errno == EINTR)
+				continue;
+			ALOGE("IPC select failed: %s, aborting!", strerror(errno));
+			return -1;
+		}
 
 		if(FD_ISSET(ipc_client_fd, &fds)) {
+			resp.data = NULL;
 			RIL_CLIENT_LOCK(client);
-			if(ipc_client_recv(ipc_client, &resp) < 0) {
-				RIL_CLIENT_UNLOCK(client);
-				ALOGE("IPC recv failed, aborting!");
+			rc = ipc_client_recv(ipc_client, &resp);
+			recv_errno = errno;
+			RIL_CLIENT_UNLOCK(client);
+			if(rc < 0) {
+				if(resp.data != NULL)
+					free(resp.data);
+				if(recv_errno == EAGAIN && ++eagain_count < IPC_MAX_EAGAIN)
+					continue;
+				ALOGE("IPC recv failed: %s, aborting!", strerror(recv_errno));
 				return -1;
 			}
-			RIL_CLIENT_UNLOCK(client);
+			eagain_count = 0;
 			
 			RIL_LOCK();
 			ipc_dispatch(ipc_client, &resp);			

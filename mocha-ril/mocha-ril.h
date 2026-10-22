@@ -225,7 +225,7 @@ typedef struct ril_gprs_connection {
 	RIL_DataCallFailCause fail_cause;
 
 	pthread_t thread;
-	pthread_mutex_t mutex;
+	int wake_fd[2];
 	int thread_state;
 } ril_gprs_connection;
 
